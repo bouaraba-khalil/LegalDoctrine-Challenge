@@ -1,0 +1,79 @@
+addToCart: (state, action) => {
+			const {
+				payload: { quantity, itemId },
+			} = action;
+			// this is just to not mutate state multiple time
+			// we will mutate state at the end
+			let data = { ...state };
+			// let's see if it already existe in our state
+			const alreadyExiste = data.items.some((item) => item.itemId === itemId);
+			if (alreadyExiste) {
+				data.items = data.items.map((item) => {
+					if (item.itemId === itemId) {
+						return { ...item, quantity: item.quantity + quantity };
+					}
+					return item;
+				});
+			} else {
+				data.items = [
+					...data.items,
+					{ itemId, quantity, price: 0, priceWithDiscounts: 0 },
+				];
+			}
+			// now we will calculate regular price
+			data.items = data.items.map((item) => {
+				const unitPrice = dataSchema.filter(
+					(schema) => schema.name === item.itemId
+				)[0].price;
+				return { ...item, price: unitPrice * item.quantity };
+			});
+			// then we will calculate discount
+			rules.forEach((rule) => {
+				// number of time that the condition is satisfied
+				let nbrOfTimes = Infinity;
+				rule.condition.forEach((element) => {
+					// does this element exist in our cart
+					const ele = data.items.filter(
+						(item) =>
+							item.itemId === element.item && item.quantity >= element.quantity
+					);
+					if (ele.length > 0 && nbrOfTimes !== 0) {
+						const times = Math.floor(ele[0].quantity / element.quantity);
+						if (times < nbrOfTimes) {
+							nbrOfTimes = times;
+						}
+					} else {
+						nbrOfTimes = 0;
+					}
+				});
+				if (nbrOfTimes) {
+					rule.discountsOn.forEach((element) => {
+						// we see if the element exist in our data to apply discount
+						const ele = data.items.filter(
+							(item) => item.itemId === element.item
+						);
+						console.log(ele);
+						if (ele.length > 0) {
+							const unitPrice = dataSchema.filter(
+								(schema) => schema.name === ele[0].itemId
+							)[0].price;
+							let priceWithDiscounts = ele[0].price;
+							nbrOfTimes =
+								nbrOfTimes > ele[0].quantity ? ele[0].quantity : nbrOfTimes;
+							for (let i = 0; i < nbrOfTimes; i++) {
+								priceWithDiscounts =
+									priceWithDiscounts - unitPrice * element.discountValue;
+							}
+							data.items = data.items.map((item) =>
+								item.itemId === element.item
+									? { ...item, priceWithDiscounts }
+									: { ...item }
+							);
+						} else {
+							// do nothing
+						}
+					});
+				}
+			});
+			return data;
+		},
