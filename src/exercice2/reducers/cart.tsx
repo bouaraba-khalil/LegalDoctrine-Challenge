@@ -6,6 +6,9 @@ import { items as dataSchema, rules } from "../data";
 // but for this some code need to be added
 // I am trying to get a single source of truth to not have a lot of duplicated data everywhere
 
+// I have a bug when 2 butter and 1 bread when I take off one butter the discount remind so I had to reset every price and
+// apply discount from scratch
+
 type cart = {
 	items: {
 		itemId: string;
@@ -41,6 +44,8 @@ export const cartSlice = createSlice({
 				(item) => item.itemId === itemToAdd.id
 			);
 			if (itemAlreadyExiste) {
+				data = resetPrice(data);
+
 				data.items = data.items.map((item) => {
 					if (item.itemId === itemToAdd.id) {
 						return {
@@ -66,66 +71,10 @@ export const cartSlice = createSlice({
 			}
 
 			// now we see if we can apply a discount
-			rules.forEach((rule) => {
-				// number of time that the condition is satisfied
-				let nbrTimeMet = Infinity;
-				rule.condition.forEach((condition) => {
-					const element = data.items.filter(
-						(item) =>
-							item.itemId === condition.itemId &&
-							item.quantity >= condition.quantity
-					);
-					if (element.length > 0 && nbrTimeMet !== 0) {
-						// negative number can break this condition but we shouldn't have negative quantity so
-						const times = Math.floor(element[0].quantity / condition.quantity);
-						nbrTimeMet = times > nbrTimeMet ? nbrTimeMet : times;
-					} else {
-						nbrTimeMet = 0;
-					}
-				});
+			data = applyDiscount(data);
 
-				if (nbrTimeMet) {
-					rule.discountsOn.forEach((discount) => {
-						// we see if the element that we want to apply the discount exist
-						const element = data.items.filter(
-							(item) => item.itemId === discount.itemId
-						);
-						if (element.length > 0) {
-							const unitPrice = dataSchema.filter(
-								(schema) => schema.id === element[0].itemId
-							)[0].price;
-							const maxNbrOfItem = discount.quantity * nbrTimeMet;
-							// nbr of item that we apply the discount to
-							const nbrOfItem =
-								element[0].quantity > maxNbrOfItem
-									? maxNbrOfItem
-									: element[0].quantity;
-							let priceWithDiscounts = element[0].price;
-							for (let i = 0; i < nbrOfItem; i++) {
-								priceWithDiscounts =
-									priceWithDiscounts - unitPrice * discount.discountValue;
-							}
-							data.items = data.items.map((item) =>
-								item.itemId === discount.itemId
-									? { ...item, priceWithDiscounts }
-									: { ...item }
-							);
-						}
-					});
-				}
-			});
 			// let's calculate the total price now
-			let subtotal = 0;
-			let totalDiscount = 0;
-
-			data.items.forEach((item) => {
-				subtotal += item.price;
-				totalDiscount += item.price - item.priceWithDiscounts;
-			});
-
-			data.subtotal = subtotal;
-			data.discount = totalDiscount;
-			data.total = subtotal - totalDiscount;
+			data = calculateTotal(data);
 			return { ...data };
 		},
 		toSubtract: (state, action) => {
@@ -139,6 +88,7 @@ export const cartSlice = createSlice({
 			if (itemAlreadyExiste.length > 0) {
 				const isItemLeft = itemAlreadyExiste[0].quantity - quantityToSub > 0;
 				if (isItemLeft) {
+					data = resetPrice(data);
 					data.items = data.items.map((item) =>
 						item.itemId === itemToSub.id
 							? {
@@ -156,68 +106,10 @@ export const cartSlice = createSlice({
 					);
 				}
 				// now we see if we can apply a discount again
-				rules.forEach((rule) => {
-					// number of time that the condition is satisfied
-					let nbrTimeMet = Infinity;
-					rule.condition.forEach((condition) => {
-						const element = data.items.filter(
-							(item) =>
-								item.itemId === condition.itemId &&
-								item.quantity >= condition.quantity
-						);
-						if (element.length > 0 && nbrTimeMet !== 0) {
-							// negative number can break this condition but we shouldn't have negative quantity so
-							const times = Math.floor(
-								element[0].quantity / condition.quantity
-							);
-							nbrTimeMet = times > nbrTimeMet ? nbrTimeMet : times;
-						} else {
-							nbrTimeMet = 0;
-						}
-					});
-
-					if (nbrTimeMet) {
-						rule.discountsOn.forEach((discount) => {
-							// we see if the element that we want to apply the discount exist
-							const element = data.items.filter(
-								(item) => item.itemId === discount.itemId
-							);
-							if (element.length > 0) {
-								const unitPrice = dataSchema.filter(
-									(schema) => schema.id === element[0].itemId
-								)[0].price;
-								const maxNbrOfItem = discount.quantity * nbrTimeMet;
-								// nbr of item that we apply the discount to
-								const nbrOfItem =
-									element[0].quantity > maxNbrOfItem
-										? maxNbrOfItem
-										: element[0].quantity;
-								let priceWithDiscounts = element[0].price;
-								for (let i = 0; i < nbrOfItem; i++) {
-									priceWithDiscounts =
-										priceWithDiscounts - unitPrice * discount.discountValue;
-								}
-								data.items = data.items.map((item) =>
-									item.itemId === discount.itemId
-										? { ...item, priceWithDiscounts }
-										: { ...item }
-								);
-							}
-						});
-					}
-				});
+				data = applyDiscount(data);
 				// let's calculate the total price now
-				let subtotal = 0;
-				let totalDiscount = 0;
+				data = calculateTotal(data);
 
-				data.items.forEach((item) => {
-					subtotal += item.price;
-					totalDiscount += item.price - item.priceWithDiscounts;
-				});
-
-				data.subtotal = subtotal;
-				data.discount = totalDiscount;
-				data.total = subtotal - totalDiscount;
 				return { ...data };
 			}
 		},
@@ -227,3 +119,85 @@ export const cartSlice = createSlice({
 export const { addToCart, toSubtract } = cartSlice.actions;
 
 export default cartSlice.reducer;
+
+const applyDiscount = (datas: cart) => {
+	let data = { ...datas };
+	rules.forEach((rule) => {
+		// number of time that the condition is satisfied
+		let nbrTimeMet = Infinity;
+		rule.condition.forEach((condition) => {
+			const element = data.items.filter(
+				(item) =>
+					item.itemId === condition.itemId &&
+					item.quantity >= condition.quantity
+			);
+			if (element.length > 0 && nbrTimeMet !== 0) {
+				// negative number can break this condition but we shouldn't have negative quantity so
+				const times = Math.floor(element[0].quantity / condition.quantity);
+				nbrTimeMet = times > nbrTimeMet ? nbrTimeMet : times;
+			} else {
+				nbrTimeMet = 0;
+			}
+		});
+
+		if (nbrTimeMet) {
+			rule.discountsOn.forEach((discount) => {
+				// we see if the element that we want to apply the discount exist
+				const element = data.items.filter(
+					(item) => item.itemId === discount.itemId
+				);
+				if (element.length > 0) {
+					const unitPrice = dataSchema.filter(
+						(schema) => schema.id === element[0].itemId
+					)[0].price;
+					const maxNbrOfItem = discount.quantity * nbrTimeMet;
+					// nbr of item that we apply the discount to
+					const nbrOfItem =
+						element[0].quantity > maxNbrOfItem
+							? maxNbrOfItem
+							: element[0].quantity;
+					let priceWithDiscounts = element[0].price;
+					for (let i = 0; i < nbrOfItem; i++) {
+						priceWithDiscounts =
+							priceWithDiscounts - unitPrice * discount.discountValue;
+					}
+					data.items = data.items.map((item) =>
+						item.itemId === discount.itemId
+							? { ...item, priceWithDiscounts }
+							: { ...item }
+					);
+				}
+			});
+		}
+	});
+	return data;
+};
+const calculateTotal = (datas: cart) => {
+	let data = { ...datas };
+	let subtotal = 0;
+	let totalDiscount = 0;
+
+	data.items.forEach((item) => {
+		subtotal += item.price;
+		totalDiscount += item.price - item.priceWithDiscounts;
+	});
+
+	data.subtotal = subtotal;
+	data.discount = totalDiscount;
+	data.total = subtotal - totalDiscount;
+	return data;
+};
+const resetPrice = (datas: cart) => {
+	let data = { ...datas };
+	data.items = data.items.map((item) => {
+		const unitPrice = dataSchema.filter(
+			(schema) => schema.id === item.itemId
+		)[0].price;
+		return {
+			...item,
+			price: unitPrice * item.quantity,
+			priceWithDiscounts: unitPrice * item.quantity,
+		};
+	});
+	return data;
+};
